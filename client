@@ -1,0 +1,130 @@
+#!/usr/bin/env python3
+
+import socket
+import ssl  # for TLS connection
+import sys
+import argparse
+
+import json
+
+
+class GameClient:
+    def __init__(self):
+        self.client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.game_id = ""
+
+    def connect_to_server(self, address, port, username):
+        try:
+            # tls encrypted connection
+            if port == 27994:
+                try:
+                    context = ssl.create_default_context()
+
+                    # Disable Certificate Verification
+                    context.check_hostname = False
+                    context.verify_mode = ssl.CERT_NONE
+
+                    self.client_sock = context.wrap_socket(self.client_sock)
+                    self.client_sock.connect((address, port))
+                    # print("Successfully Connected to the server by TLs encrypted connection")
+
+                except ssl.SSLError as e:
+                    print("Can't connect to the server with error %s", e)
+                    sys.exit(1)
+            else:
+                # non-encrypted connection
+                self.client_sock.connect((address, port))
+                # print("Connected to the server by non-encrypted connection")
+
+            # send "hello" message as Json to server
+            hello_message = json.dumps({"type": "hello", "northeastern_username": username}) + '\n'
+            self.client_sock.sendall(hello_message.encode('ascii'))
+
+            # receive the response from server
+            response = self.client_sock.recv(2048).decode('ascii')
+
+            # convert the json string to python dictionary
+            start_message = json.loads(response.strip())
+
+            # if start_message['type'] == 'start':
+            #     print(start_message)
+            # elif start_message['type'] == 'error':
+            #     print("Error message from server: ", start_message)
+
+            # store the game id into global variable
+            self.game_id = start_message["id"]
+            # print("Game id is: ", game_id)
+
+        except socket.error as e:
+            print("Can't connect to the server with error %s", e)
+
+    def guess_the_word(self):
+        word_list = []
+        with open('project1-words.txt', 'r') as f:
+            for line in f:
+                word_list.append(line.strip())
+        while True:
+            # print("Current length of word_list is: ", len(word_list))
+            guess_word = word_list.pop()
+            # send "guess" message as Json to server
+            guess_message = json.dumps({"type": "guess", "id": self.game_id, "word": guess_word}) + '\n'
+            self.client_sock.sendall(guess_message.encode('ascii'))
+            response = self.client_sock.recv(2048).decode('ascii')
+            guess_response = json.loads(response)
+
+            # print(guess_response)
+
+            if guess_response["type"] == "bye":
+                # print("Sucessfully guess the word")
+                # print("The word is: ", guess_word)
+
+                flag = guess_response["flag"]
+                print(flag)
+                self.client_sock.close()
+                break
+
+            if guess_response["type"] == "retry":
+                marks = guess_response["guesses"][-1]["marks"]
+                # print("Guess Again")
+                # print("Guess: ", guess_word, " and the marks is: ", marks)
+                #
+                # print(len(word_list))
+
+                for i, each in enumerate(marks):
+                    if each == 1:
+                        word_list = [word for word in word_list if word[i] != guess_word[i] and guess_word[i] in word]
+                        # print(len(word_list))
+
+                    elif each == 2:
+                        word_list = [word for word in word_list if word[i] == guess_word[i]]
+                        # print(len(word_list))
+
+                    # elif each == 0:
+                    #     # remove the word that contains the letter
+                    #     word_list = [word for word in word_list if guess_word[i] not in word]
+                    #     print(len(word_list))
+
+
+def main():
+    # $ ./client <-p port> <-s> <hostname> <Northeastern-username>
+    command_parser = argparse.ArgumentParser()
+    command_parser.add_argument('-p', type=int, help='Port number', default=27993)
+    command_parser.add_argument('-s', action='store_true', help='TLS encryption required')
+    command_parser.add_argument('hostname', type=str, help='Server hostname')
+    command_parser.add_argument('username', type=str, help='Northeastern username')
+    args = command_parser.parse_args()
+
+    client = GameClient()
+
+    # parse the command line arguments
+    if args.s and args.p == 27993:
+        port = 27994
+    else:
+        port = command_parser.parse_args().p
+
+    client.connect_to_server(args.hostname, port, args.username)
+    client.guess_the_word()
+
+
+if __name__ == '__main__':
+    main()
